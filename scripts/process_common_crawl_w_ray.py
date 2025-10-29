@@ -78,7 +78,6 @@ def open_file(path, mode="rb", profile=None):
         obj = s3.Object(bucket_name, key)
         if mode == "rb":
             print("reading")
-            # Стрімимо в тимчасовий файл, щоб не тримати в пам'яті
             body = obj.get()["Body"]
             tmp = tempfile.NamedTemporaryFile(delete=False)
             for chunk in iter(lambda: body.read(8 * 1024 * 1024), b""):
@@ -177,24 +176,25 @@ def process_file(s3, path, documents_per_jsonl, is_wet, output_dir, counter, ext
         output_dir.rstrip('/') + "_check", os.path.basename(hash_path).replace(".gz", "") + ".stat"
     )
     
-    s3 = boto3.resource('s3')
+    if output_file_check.startswith("s3://"):
+        s3 = boto3.resource("s3")
+        try:
+            check_bucket, check_key = output_file_check[5:].split("/", 1)
+            s3.Object(check_bucket, check_key).load()
+            wet_count = ray.get(counter.increment_token_count.remote(1))
+            if wet_count % 1000 == 0:
+                print(f"Seen wet count {wet_count}")
+            return [{"time": 0}]
+        except botocore.exceptions.ClientError as e:
+            if e.response.get("Error", {}).get("Code") != "404":
+                pass  # інші помилки — порахуємо заново
+    else:
+        if os.path.exists(output_file_check):
+            wet_count = ray.get(counter.increment_token_count.remote(1))
+            if wet_count % 1000 == 0:
+                print(f"Seen wet count {wet_count}")
+            return [{"time": 0}]
 
-    try:
-        check_bucket, check_key = output_file_check[5:].split("/", 1)
-        check_obj = s3.Object(check_bucket, check_key).load()
-        wet_count = ray.get(counter.increment_token_count.remote(1))
-
-        if wet_count % 1000 == 0:
-            print(f"Seen wet count {wet_count}")
-        return [{"time": 0}]
-    except botocore.exceptions.ClientError as e:
-        if e.response['Error']['Code'] == "404":
-            # The object does not exist.
-            pass
-        else:
-            # Something else has gone wrong.
-            # For now, recompute
-            pass
 
     dump_month = MONTH_EXTRACTOR.search(path).group(1)
     if documents_per_jsonl is not None:

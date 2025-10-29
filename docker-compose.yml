@@ -1,0 +1,19 @@
+version: '2.2'
+
+services:
+  web-dumps:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      network: host
+
+    entrypoint: /bin/bash
+    command: -c "while true; do sleep 1000; done"
+
+    environment:
+      - AWS_NO_SIGN_REQUEST=1
+
+    restart: unless-stopped
+    extra_hosts:
+      - host.docker.internal:host-gateway
+  
